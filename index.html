@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local LLM Literature Reviewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        // Configure PDF.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="container mx-auto p-8">
+        <h1 class="text-4xl font-bold mb-8 text-center">📚 Local LLM Literature Reviewer</h1>
+        
+        <!-- PDF Upload Zone -->
+        <div class="mb-8">
+            <h2 class="text-2xl font-semibold mb-4">Upload Research Papers</h2>
+            <div id="dropZone" class="border-4 border-dashed border-gray-600 rounded-lg p-12 text-center cursor-pointer hover:border-blue-500 transition-colors">
+                <svg class="mx-auto h-12 w-12 text-gray-400 mb-4" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                    <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                <p class="text-lg mb-2">Drag & Drop PDF files here</p>
+                <p class="text-gray-400 mb-4">or</p>
+                <button class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg font-semibold">Browse Files</button>
+                <input type="file" id="fileInput" accept=".pdf" multiple class="hidden">
+            </div>
+        </div>
+
+        <!-- Status & Results -->
+        <div id="status" class="mb-8 p-4 bg-gray-800 rounded-lg hidden">
+            <h3 class="text-xl font-semibold mb-2">Processing Status</h3>
+            <div id="statusContent" class="text-gray-300"></div>
+        </div>
+
+        <!-- Processed Documents -->
+        <div id="documentsSection" class="mb-8 hidden">
+            <h2 class="text-2xl font-semibold mb-4">Processed Documents</h2>
+            <div id="documentsList" class="space-y-2"></div>
+        </div>
+
+        <!-- Chunks Display (for debugging) -->
+        <div id="chunksSection" class="mb-8 hidden">
+            <h2 class="text-2xl font-semibold mb-4">Text Chunks</h2>
+            <div id="chunksList" class="bg-gray-800 p-4 rounded-lg max-h-96 overflow-y-auto"></div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
