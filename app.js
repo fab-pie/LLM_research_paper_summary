@@ -2,7 +2,10 @@
 const state = {
     documents: [],
     chunks: [],
-    vectorStore: []
+    vectorStore: [],
+    embeddingModel: null,  // Will store the Transformers.js pipeline
+    isModelLoading: false,
+    isModelReady: false
 };
 
 // DOM elements
@@ -14,6 +17,10 @@ const documentsSection = document.getElementById('documentsSection');
 const documentsList = document.getElementById('documentsList');
 const chunksSection = document.getElementById('chunksSection');
 const chunksList = document.getElementById('chunksList');
+const searchSection = document.getElementById('searchSection');
+const searchInput = document.getElementById('searchInput');
+const searchButton = document.getElementById('searchButton');
+const searchResults = document.getElementById('searchResults');
 
 // Initialize drag and drop
 function initDragAndDrop() {
@@ -112,7 +119,42 @@ async function processPDF(file) {
         const chunks = chunkText(fullText, file.name);
         state.chunks.push(...chunks);
 
-        console.log(`Processed: ${file.name} (${numPages} pages, ${chunks.length} chunks)`);
+        // Load embedding model if not already loaded
+        if (!state.isModelReady) {
+            await loadEmbeddingModel();
+        }
+
+        // Generate embeddings for each chunk and store in vectorStore
+        showStatus(`Generating embeddings for ${chunks.length} chunks...`, 'info');
+        
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            
+            try {
+                // Generate embedding for this chunk
+                const embedding = await generateEmbedding(chunk.text);
+                
+                // Store in vector store
+                state.vectorStore.push({
+                    text: chunk.text,
+                    embedding: embedding,
+                    source: chunk.source,
+                    index: chunk.index,
+                    startPos: chunk.startPos,
+                    endPos: chunk.endPos
+                });
+                
+                // Update progress every 5 chunks
+                if ((i + 1) % 5 === 0 || i === chunks.length - 1) {
+                    showStatus(`Generated embeddings: ${i + 1}/${chunks.length}`, 'info');
+                }
+                
+            } catch (error) {
+                console.error(`Error generating embedding for chunk ${i}:`, error);
+            }
+        }
+
+        console.log(`Processed: ${file.name} (${numPages} pages, ${chunks.length} chunks, ${state.vectorStore.length} vectors)`);
         
     } catch (error) {
         console.error(`Error processing ${file.name}:`, error);
@@ -163,29 +205,6 @@ function showStatus(message, type = 'info') {
     statusContent.innerHTML = `<span class="${colors[type]}">${message}</span>`;
 }
 
-function updateDocumentsDisplay() {
-    if (state.documents.length === 0) {
-        documentsSection.classList.add('hidden');
-        return;
-    }
-
-    documentsSection.classList.remove('hidden');
-    documentsList.innerHTML = state.documents.map((doc, index) => `
-        <div class="bg-gray-800 p-4 rounded-lg">
-            <div class="flex items-center justify-between">
-                <div>
-                    <h3 class="font-semibold text-lg">${doc.filename}</h3>
-                    <p class="text-gray-400 text-sm">${doc.numPages} pages</p>
-                </div>
-                <div class="text-right">
-                    <p class="text-blue-400 font-semibold">${state.chunks.filter(c => c.source === doc.filename).length} chunks</p>
-                    <p class="text-gray-500 text-xs">${new Date(doc.uploadDate).toLocaleString()}</p>
-                </div>
-            </div>
-        </div>
-    `).join('');
-}
-
 function updateChunksDisplay() {
     if (state.chunks.length === 0) {
         chunksSection.classList.add('hidden');
@@ -210,6 +229,222 @@ function updateChunksDisplay() {
     `;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// EMBEDDINGS & VECTOR STORE (Section 1.2)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Load the embedding model
+async function loadEmbeddingModel() {
+    if (state.isModelLoading || state.isModelReady) {
+        return state.embeddingModel;
+    }
+    
+    state.isModelLoading = true;
+    showStatus('Loading embedding model (Xenova/all-MiniLM-L6-v2)...', 'info');
+    
+    try {
+        // Initialize the feature extraction pipeline
+        state.embeddingModel = await window.transformersPipeline(
+            'feature-extraction',
+            'Xenova/all-MiniLM-L6-v2'
+        );
+        
+        state.isModelReady = true;
+        state.isModelLoading = false;
+        
+        showStatus('Embedding model loaded successfully! 🎉', 'success');
+        console.log('Embedding model ready');
+        
+        return state.embeddingModel;
+        
+    } catch (error) {
+        state.isModelLoading = false;
+        console.error('Error loading embedding model:', error);
+        showStatus(`Error loading model: ${error.message}`, 'error');
+        throw error;
+    }
+}
+
+// Generate embedding for a single text
+async function generateEmbedding(text) {
+    if (!state.embeddingModel) {
+        await loadEmbeddingModel();
+    }
+    
+    try {
+        // Generate embedding
+        const output = await state.embeddingModel(text, {
+            pooling: 'mean',
+            normalize: true
+        });
+        
+        // Convert to regular array
+        return Array.from(output.data);
+        
+    } catch (error) {
+        console.error('Error generating embedding:', error);
+        throw error;
+    }
+}
+
+// Cosine similarity between two vectors
+function cosineSimilarity(vecA, vecB) {
+    /*
+    Formula: similarity = (A · B) / (||A|| × ||B||)
+    
+    Where:
+    - A · B is the dot product (sum of A[i] * B[i])
+    - ||A|| is the magnitude of vector A (square root of sum of A[i]²)
+    - ||B|| is the magnitude of vector B
+    */
+    
+    if (vecA.length !== vecB.length) {
+        throw new Error('Vectors must have the same length');
+    }
+    
+    let dotProduct = 0;
+    let magnitudeA = 0;
+    let magnitudeB = 0;
+    
+    for (let i = 0; i < vecA.length; i++) {
+        dotProduct += vecA[i] * vecB[i];
+        magnitudeA += vecA[i] * vecA[i];
+        magnitudeB += vecB[i] * vecB[i];
+    }
+    
+    magnitudeA = Math.sqrt(magnitudeA);
+    magnitudeB = Math.sqrt(magnitudeB);
+    
+    if (magnitudeA === 0 || magnitudeB === 0) {
+        return 0;
+    }
+    
+    return dotProduct / (magnitudeA * magnitudeB);
+}
+
+// Search for most relevant chunks
+async function searchVectorStore(query, topK = 5) {
+    if (state.vectorStore.length === 0) {
+        console.warn('Vector store is empty');
+        return [];
+    }
+    
+    // Generate embedding for the query
+    const queryEmbedding = await generateEmbedding(query);
+    
+    // Calculate similarity for each chunk
+    const results = state.vectorStore.map(item => ({
+        ...item,
+        similarity: cosineSimilarity(queryEmbedding, item.embedding)
+    }));
+    
+    // Sort by similarity (highest first) and return top K
+    return results
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, topK);
+}
+
+// Handle search button click
+function initSearch() {
+    searchButton.addEventListener('click', async () => {
+        const query = searchInput.value.trim();
+        
+        if (!query) {
+            searchResults.innerHTML = '<p class="text-red-400">Please enter a search query</p>';
+            return;
+        }
+        
+        if (state.vectorStore.length === 0) {
+            searchResults.innerHTML = '<p class="text-red-400">No documents loaded. Please upload PDFs first.</p>';
+            return;
+        }
+        
+        searchButton.disabled = true;
+        searchButton.textContent = 'Searching...';
+        
+        try {
+            const results = await searchVectorStore(query, 5);
+            displaySearchResults(results, query);
+        } catch (error) {
+            searchResults.innerHTML = `<p class="text-red-400">Error: ${error.message}</p>`;
+        } finally {
+            searchButton.disabled = false;
+            searchButton.textContent = 'Search';
+        }
+    });
+    
+    // Allow Enter key to search
+    searchInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            searchButton.click();
+        }
+    });
+}
+
+// Display search results
+function displaySearchResults(results, query) {
+    if (results.length === 0) {
+        searchResults.innerHTML = '<p class="text-gray-400">No results found</p>';
+        return;
+    }
+    
+    searchResults.innerHTML = `
+        <h3 class="text-lg font-semibold mb-4 text-green-400">Found ${results.length} relevant chunks:</h3>
+        <div class="space-y-4">
+            ${results.map((result, index) => `
+                <div class="bg-gray-700 p-4 rounded-lg">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <span class="text-blue-400 font-semibold">Rank ${index + 1}</span>
+                            <span class="text-gray-400 text-sm ml-2">• ${result.source}</span>
+                        </div>
+                        <span class="text-green-400 font-mono text-sm">
+                            ${(result.similarity * 100).toFixed(1)}% match
+                        </span>
+                    </div>
+                    <p class="text-gray-200 text-sm leading-relaxed">${result.text}</p>
+                    <div class="mt-2 text-xs text-gray-500">
+                        Chunk #${result.index} (pos: ${result.startPos}-${result.endPos})
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+// Update documents display to show search section
+function updateDocumentsDisplay() {
+    if (state.documents.length === 0) {
+        documentsSection.classList.add('hidden');
+        searchSection.classList.add('hidden');
+        return;
+    }
+
+    documentsSection.classList.remove('hidden');
+    
+    // Show search section when vectors are ready
+    if (state.vectorStore.length > 0) {
+        searchSection.classList.remove('hidden');
+    }
+    
+    documentsList.innerHTML = state.documents.map((doc, index) => `
+        <div class="bg-gray-800 p-4 rounded-lg">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="font-semibold text-lg">${doc.filename}</h3>
+                    <p class="text-gray-400 text-sm">${doc.numPages} pages</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-blue-400 font-semibold">${state.chunks.filter(c => c.source === doc.filename).length} chunks</p>
+                    <p class="text-green-400 font-semibold">${state.vectorStore.filter(v => v.source === doc.filename).length} vectors</p>
+                    <p class="text-gray-500 text-xs">${new Date(doc.uploadDate).toLocaleString()}</p>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
 // Initialize the application
 initDragAndDrop();
+initSearch();
 console.log('PDF Processor initialized');

@@ -10,6 +10,16 @@
         // Configure PDF.js worker
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     </script>
+    <!-- Transformers.js for embeddings -->
+    <script type="module">
+        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+        
+        // Disable local model loading, use remote models
+        env.allowLocalModels = false;
+        
+        // Make pipeline available globally
+        window.transformersPipeline = pipeline;
+    </script>
 </head>
 <body class="bg-gray-900 text-white min-h-screen">
     <div class="container mx-auto p-8">
@@ -39,6 +49,29 @@
         <div id="documentsSection" class="mb-8 hidden">
             <h2 class="text-2xl font-semibold mb-4">Processed Documents</h2>
             <div id="documentsList" class="space-y-2"></div>
+        </div>
+
+        <!-- Vector Search Test -->
+        <div id="searchSection" class="mb-8 hidden">
+            <h2 class="text-2xl font-semibold mb-4">🔍 Test Vector Search</h2>
+            <div class="bg-gray-800 p-6 rounded-lg">
+                <div class="mb-4">
+                    <label class="block text-gray-300 mb-2">Enter a query to search the documents:</label>
+                    <input 
+                        type="text" 
+                        id="searchInput" 
+                        class="w-full bg-gray-700 text-white px-4 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="e.g., machine learning techniques, neural networks..."
+                    >
+                </div>
+                <button 
+                    id="searchButton" 
+                    class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg font-semibold"
+                >
+                    Search
+                </button>
+                <div id="searchResults" class="mt-6"></div>
+            </div>
         </div>
 
         <!-- Chunks Display (for debugging) -->
