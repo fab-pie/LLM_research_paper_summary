@@ -5,7 +5,13 @@ const state = {
     vectorStore: [],
     embeddingModel: null,  // Will store the Transformers.js pipeline
     isModelLoading: false,
-    isModelReady: false
+    isModelReady: false,
+    // LLM state
+    llmEngine: null,
+    llmLoading: false,
+    llmReady: false,
+    chatHistory: [],
+    selectedModel: null
 };
 
 // DOM elements
@@ -21,6 +27,21 @@ const searchSection = document.getElementById('searchSection');
 const searchInput = document.getElementById('searchInput');
 const searchButton = document.getElementById('searchButton');
 const searchResults = document.getElementById('searchResults');
+
+// LLM DOM elements
+const modelSelect = document.getElementById('modelSelect');
+const loadModelButton = document.getElementById('loadModelButton');
+const loadingProgress = document.getElementById('loadingProgress');
+const loadingText = document.getElementById('loadingText');
+const loadingPercent = document.getElementById('loadingPercent');
+const progressBar = document.getElementById('progressBar');
+const modelInfo = document.getElementById('modelInfo');
+const modelName = document.getElementById('modelName');
+const chatSection = document.getElementById('chatSection');
+const chatMessages = document.getElementById('chatMessages');
+const chatInput = document.getElementById('chatInput');
+const sendButton = document.getElementById('sendButton');
+const useRAG = document.getElementById('useRAG');
 
 // Initialize drag and drop
 function initDragAndDrop() {
@@ -252,7 +273,7 @@ async function loadEmbeddingModel() {
         state.isModelReady = true;
         state.isModelLoading = false;
         
-        showStatus('Embedding model loaded successfully! 🎉', 'success');
+        showStatus('Embedding model loaded successfully!', 'success');
         console.log('Embedding model ready');
         
         return state.embeddingModel;
@@ -444,7 +465,244 @@ function updateDocumentsDisplay() {
     `).join('');
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// WEBLLM INTEGRATION (Section 2.1)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Load LLM model
+async function loadLLMModel() {
+    const selectedModelId = modelSelect.value;
+    
+    if (!selectedModelId) {
+        alert('Please select a model first');
+        return;
+    }
+    
+    // Reset state if reloading
+    if (state.llmEngine) {
+        try {
+            // Clean up old engine
+            state.llmEngine = null;
+            state.llmReady = false;
+        } catch (e) {
+            console.warn('Error cleaning up old engine:', e);
+        }
+    }
+    
+    state.selectedModel = selectedModelId;
+    state.llmLoading = true;
+    state.llmReady = false;
+    
+    loadModelButton.disabled = true;
+    loadModelButton.textContent = 'Loading...';
+    loadingProgress.classList.remove('hidden');
+    modelInfo.classList.add('hidden');
+    progressBar.style.width = '0%';
+    loadingPercent.textContent = '0%';
+    
+    try {
+        console.log('Starting to load model:', selectedModelId);
+        
+        // Create the engine with progress callback
+        state.llmEngine = await window.CreateMLCEngine(
+            selectedModelId,
+            {
+                initProgressCallback: (progress) => {
+                    // Update progress bar
+                    const percent = Math.round(progress.progress * 100);
+                    progressBar.style.width = `${percent}%`;
+                    loadingPercent.textContent = `${percent}%`;
+                    loadingText.textContent = progress.text || 'Loading...';
+                    console.log(`Loading progress: ${percent}% - ${progress.text}`);
+                }
+            }
+        );
+        
+        console.log('Engine created, verifying...');
+        
+        // Verify engine is ready by testing it
+        if (!state.llmEngine) {
+            throw new Error('Engine creation failed - engine is null');
+        }
+        
+        state.llmReady = true;
+        state.llmLoading = false;
+        
+        // Show success message
+        loadingProgress.classList.add('hidden');
+        modelInfo.classList.remove('hidden');
+        modelName.textContent = modelSelect.options[modelSelect.selectedIndex].text;
+        loadModelButton.textContent = 'Model Loaded';
+        
+        // Show chat interface
+        chatSection.classList.remove('hidden');
+        
+        // Add system message to chat
+        addMessage('system', 'Model loaded! You can now ask questions about your uploaded documents.');
+        
+        console.log('LLM Engine loaded successfully:', selectedModelId);
+        
+    } catch (error) {
+        console.error('Error loading LLM:', error);
+        console.error('Error stack:', error.stack);
+        
+        alert(`Failed to load model: ${error.message}\n\nPlease try:\n1. Using a different browser (Chrome/Edge 113+)\n2. Checking your internet connection\n3. Refreshing the page and trying again`);
+        
+        state.llmEngine = null;
+        state.llmReady = false;
+        state.llmLoading = false;
+        loadModelButton.disabled = false;
+        loadModelButton.textContent = 'Load Model';
+        loadingProgress.classList.add('hidden');
+    }
+}
+
+// Add message to chat
+function addMessage(role, content, sources = []) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+    
+    const bubbleClass = role === 'user' 
+        ? 'bg-blue-600 text-white' 
+        : role === 'system'
+        ? 'bg-gray-700 text-gray-300'
+        : 'bg-gray-700 text-white';
+    
+    let sourcesHtml = '';
+    if (sources.length > 0) {
+        sourcesHtml = `
+            <div class="mt-2 pt-2 border-t border-gray-600 text-xs">
+                <p class="font-semibold mb-1">Sources used:</p>
+                ${sources.map(s => `<p class="text-gray-400">• ${s.source} (chunk #${s.index}, ${(s.similarity * 100).toFixed(1)}% match)</p>`).join('')}
+            </div>
+        `;
+    }
+    
+    messageDiv.innerHTML = `
+        <div class="${bubbleClass} rounded-lg px-4 py-3 max-w-[80%]">
+            <div class="text-sm whitespace-pre-wrap">${content}</div>
+            ${sourcesHtml}
+        </div>
+    `;
+    
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// Send message
+async function sendMessage() {
+    const message = chatInput.value.trim();
+    
+    if (!message) return;
+    
+    // Strict verification that model is loaded
+    if (!state.llmReady || !state.llmEngine) {
+        alert('Please load a model first. Click "Load Model" button above.');
+        return;
+    }
+    
+    // Add user message to UI
+    addMessage('user', message);
+    chatInput.value = '';
+    
+    // Add to chat history
+    state.chatHistory.push({ role: 'user', content: message });
+    
+    // Disable input while processing
+    sendButton.disabled = true;
+    chatInput.disabled = true;
+    sendButton.textContent = 'Thinking...';
+    
+    try {
+        let contextChunks = [];
+        let systemPrompt = `You are an expert academic researcher and literature reviewer. You help users understand and synthesize research papers.`;
+        
+        // Use RAG if enabled and documents are available
+        if (useRAG.checked && state.vectorStore.length > 0) {
+            sendButton.textContent = 'Searching docs...';
+            
+            try {
+                // Search for relevant chunks
+                contextChunks = await searchVectorStore(message, 5);
+                
+                if (contextChunks.length > 0) {
+                    const contextText = contextChunks
+                        .map((c, i) => `[Document ${i + 1}: ${c.source}]\n${c.text}`)
+                        .join('\n\n---\n\n');
+                    
+                    systemPrompt += `\n\nYou have access to the following relevant excerpts from uploaded research papers:\n\n${contextText}\n\nUse these excerpts to answer the user's question. Reference specific documents when relevant.`;
+                }
+            } catch (searchError) {
+                console.error('Error during RAG search:', searchError);
+                // Continue without RAG if search fails
+            }
+        }
+        
+        sendButton.textContent = 'Generating...';
+        
+        // Create messages for the LLM
+        const messages = [
+            { role: 'system', content: systemPrompt },
+            ...state.chatHistory.slice(-10) // Keep last 10 messages for context
+        ];
+        
+        console.log('Sending request to LLM...');
+        
+        // Verify engine one more time before calling
+        if (!state.llmEngine || !state.llmEngine.chat) {
+            throw new Error('LLM engine is not properly initialized. Please reload the model.');
+        }
+        
+        // Generate response
+        const response = await state.llmEngine.chat.completions.create({
+            messages: messages,
+            temperature: 0.7,
+            max_tokens: 512
+        });
+        
+        if (!response || !response.choices || !response.choices[0]) {
+            throw new Error('Invalid response from LLM');
+        }
+        
+        const assistantMessage = response.choices[0].message.content;
+        
+        // Add assistant response to UI with sources
+        addMessage('assistant', assistantMessage, contextChunks);
+        
+        // Add to chat history
+        state.chatHistory.push({ role: 'assistant', content: assistantMessage });
+        
+        console.log('Response generated successfully');
+        
+    } catch (error) {
+        console.error('Error generating response:', error);
+        console.error('Error details:', error.message);
+        console.error('Error stack:', error.stack);
+        addMessage('system', `Error: ${error.message}`);
+    } finally {
+        sendButton.disabled = false;
+        chatInput.disabled = false;
+        sendButton.textContent = 'Send';
+        chatInput.focus();
+    }
+}
+
+// Initialize LLM controls
+function initLLM() {
+    loadModelButton.addEventListener('click', loadLLMModel);
+    
+    sendButton.addEventListener('click', sendMessage);
+    
+    chatInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+}
+
 // Initialize the application
 initDragAndDrop();
 initSearch();
+initLLM();
 console.log('PDF Processor initialized');
