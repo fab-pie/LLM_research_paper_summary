@@ -121,46 +121,7 @@
             </div>
         </div>
 
-        <!-- Model Selection -->
-        <div class="mb-8">
-            <h2 class="text-xl font-semibold mb-3">Select LLM Model</h2>
-            <div class="bg-gray-800 p-4 rounded-lg">
-                <div class="flex gap-3 items-center">
-                    <div class="flex-1">
-                        <select id="modelSelect" class="w-full bg-gray-700 text-white px-4 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="">-- Select a model --</option>
-                            <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B (Recommended - Fast, 600MB)</option>
-                            <option value="Llama-3.2-3B-Instruct-q4f16_1-MLC">Llama 3.2 3B (Better Quality, 1.9GB)</option>
-                            <option value="Phi-3.5-mini-instruct-q4f16_1-MLC">Phi 3.5 Mini (Microsoft, 2.3GB)</option>
-                            <option value="gemma-2-2b-it-q4f16_1-MLC">Gemma 2 2B (Google, 1.6GB)</option>
-                            <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC">Qwen 2.5 1.5B (Alibaba, 1GB)</option>
-                        </select>
-                    </div>
-                    <button 
-                        id="loadModelButton" 
-                        class="bg-green-600 hover:bg-green-700 px-6 py-2 rounded-lg font-semibold disabled:bg-gray-600 disabled:cursor-not-allowed whitespace-nowrap"
-                    >
-                        Load Model
-                    </button>
-                </div>
-                
-                <!-- Loading Progress -->
-                <div id="loadingProgress" class="mt-4 hidden">
-                    <div class="flex items-center justify-between mb-2">
-                        <span class="text-sm text-gray-300" id="loadingText">Initializing...</span>
-                        <span class="text-sm text-gray-400" id="loadingPercent">0%</span>
-                    </div>
-                    <div class="w-full bg-gray-700 rounded-full h-2">
-                        <div id="progressBar" class="bg-blue-500 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
-                    </div>
-                </div>
-                
-                <!-- Model Info -->
-                <div id="modelInfo" class="mt-4 p-3 bg-gray-900 rounded text-sm hidden">
-                    <p class="text-green-400"><span id="modelName"></span> loaded successfully!</p>
-                </div>
-            </div>
-        </div>
+        
 
         <!-- Chat Interface -->
         <div id="chatSection" class="mb-8 hidden">

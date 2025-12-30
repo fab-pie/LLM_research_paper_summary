@@ -254,30 +254,38 @@ function updateChunksDisplay() {
 // EMBEDDINGS & VECTOR STORE (Section 1.2)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Load the embedding model
-async function loadEmbeddingModel() {
-    if (state.isModelLoading || state.isModelReady) {
+// Load the embedding model (optionally force reload)
+async function loadEmbeddingModel(force = false) {
+    if (state.isModelLoading) return state.embeddingModel;
+
+    if (state.isModelReady && !force) {
         return state.embeddingModel;
     }
-    
+
+    // If forcing, clear previous model reference
+    if (force) {
+        state.embeddingModel = null;
+        state.isModelReady = false;
+    }
+
     state.isModelLoading = true;
     showStatus('Loading embedding model (Xenova/all-MiniLM-L6-v2)...', 'info');
-    
+
     try {
         // Initialize the feature extraction pipeline
         state.embeddingModel = await window.transformersPipeline(
             'feature-extraction',
             'Xenova/all-MiniLM-L6-v2'
         );
-        
+
         state.isModelReady = true;
         state.isModelLoading = false;
-        
+
         showStatus('Embedding model loaded successfully!', 'success');
         console.log('Embedding model ready');
-        
+
         return state.embeddingModel;
-        
+
     } catch (error) {
         state.isModelLoading = false;
         console.error('Error loading embedding model:', error);
@@ -304,6 +312,21 @@ async function generateEmbedding(text) {
         
     } catch (error) {
         console.error('Error generating embedding:', error);
+
+        // If tokenizer/native object was deleted or similar, try reloading the embedding model once
+        const msg = String(error.message || '').toLowerCase();
+        if (msg.includes('tokenizer') || msg.includes('deleted object') || msg.includes('cannot pass deleted')) {
+            console.warn('Embedding model appears corrupted. Reloading model and retrying once...');
+            try {
+                await loadEmbeddingModel(true);
+                const retryOut = await state.embeddingModel(text, { pooling: 'mean', normalize: true });
+                return Array.from(retryOut.data);
+            } catch (retryErr) {
+                console.error('Retry failed:', retryErr);
+                throw retryErr;
+            }
+        }
+
         throw error;
     }
 }
@@ -648,11 +671,20 @@ async function sendMessage() {
         
         console.log('Sending request to LLM...');
         
-        // Verify engine one more time before calling
+        // Verify engine one more time before calling. If the engine exposes a reload method,
+        // attempt a reload to ensure the model is fully loaded in memory (prevents "Model not loaded" errors).
         if (!state.llmEngine || !state.llmEngine.chat) {
             throw new Error('LLM engine is not properly initialized. Please reload the model.');
         }
-        
+
+        if (typeof state.llmEngine.reload === 'function') {
+            try {
+                await state.llmEngine.reload(state.selectedModel);
+            } catch (reloadErr) {
+                console.warn('LLM reload attempt failed or was unnecessary:', reloadErr.message || reloadErr);
+            }
+        }
+
         // Generate response
         const response = await state.llmEngine.chat.completions.create({
             messages: messages,
