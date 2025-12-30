@@ -28,6 +28,13 @@ const searchInput = document.getElementById('searchInput');
 const searchButton = document.getElementById('searchButton');
 const searchResults = document.getElementById('searchResults');
 
+// PDF loading overlay elements
+const pdfLoadingOverlay = document.getElementById('pdfLoadingOverlay');
+const pdfLoadingText = document.getElementById('pdfLoadingText');
+const pdfLoadingSub = document.getElementById('pdfLoadingSub');
+const pdfLoadingBar = document.getElementById('pdfLoadingBar');
+const pdfLoadingPercent = document.getElementById('pdfLoadingPercent');
+
 // LLM DOM elements
 const modelSelect = document.getElementById('modelSelect');
 const loadModelButton = document.getElementById('loadModelButton');
@@ -99,14 +106,21 @@ async function handleFiles(files) {
     }
 
     showStatus(`Processing ${pdfFiles.length} PDF file(s)...`, 'info');
+    try {
+        showPdfLoading(pdfFiles.length);
 
-    for (const file of pdfFiles) {
-        await processPDF(file);
+        for (let i = 0; i < pdfFiles.length; i++) {
+            const file = pdfFiles[i];
+            updatePdfLoadingFile(i + 1, pdfFiles.length, file.name);
+            await processPDF(file);
+        }
+
+        showStatus(`Successfully processed ${pdfFiles.length} PDF file(s)!`, 'success');
+    } finally {
+        hidePdfLoading();
+        updateDocumentsDisplay();
+        updateChunksDisplay();
     }
-
-    showStatus(`Successfully processed ${pdfFiles.length} PDF file(s)!`, 'success');
-    updateDocumentsDisplay();
-    updateChunksDisplay();
 }
 
 // Extract text from PDF using pdf.js
@@ -124,7 +138,17 @@ async function processPDF(file) {
             const textContent = await page.getTextContent();
             const pageText = textContent.items.map(item => item.str).join(' ');
             fullText += pageText + '\n';
+
+            // Update loading overlay for extraction progress (0-40%)
+            const extractPercent = Math.round((pageNum / numPages) * 40);
+            updatePdfLoadingProgress(extractPercent, `Extracting page ${pageNum}/${numPages}`);
         }
+
+        // Mark extraction complete on overlay
+        updatePdfLoadingProgress(40, 'Extraction complete');
+
+        // Small delay to let the UI update visibly before loading model
+        await new Promise(resolve => setTimeout(resolve, 150));
 
         // Store document
         const document = {
@@ -142,16 +166,29 @@ async function processPDF(file) {
 
         // Load embedding model if not already loaded
         if (!state.isModelReady) {
+            // Indicate model-loading step clearly so user doesn't think progress is stuck
+            updatePdfLoadingProgress(45, 'Loading embedding model...');
             await loadEmbeddingModel();
+            // Slight progress bump after model is ready
+            updatePdfLoadingProgress(48, 'Embedding model ready');
+            await new Promise(resolve => setTimeout(resolve, 200));
         }
 
         // Generate embeddings for each chunk and store in vectorStore
         showStatus(`Generating embeddings for ${chunks.length} chunks...`, 'info');
         
+        // Notify start of embedding generation
+        updatePdfLoadingProgress(null, 'Generating embeddings...');
+
         for (let i = 0; i < chunks.length; i++) {
             const chunk = chunks[i];
             
             try {
+                // Update overlay to indicate which chunk is about to be processed
+                updatePdfLoadingProgress(null, `Generating embedding ${i + 1}/${chunks.length}`);
+                // allow DOM to repaint so the message is visible before heavy work
+                await new Promise(resolve => requestAnimationFrame(resolve));
+
                 // Generate embedding for this chunk
                 const embedding = await generateEmbedding(chunk.text);
                 
@@ -165,7 +202,7 @@ async function processPDF(file) {
                     endPos: chunk.endPos
                 });
                 
-                // Update progress every 5 chunks
+                // Update status every 5 chunks
                 if ((i + 1) % 5 === 0 || i === chunks.length - 1) {
                     showStatus(`Generated embeddings: ${i + 1}/${chunks.length}`, 'info');
                 }
@@ -224,6 +261,44 @@ function showStatus(message, type = 'info') {
     };
     
     statusContent.innerHTML = `<span class="${colors[type]}">${message}</span>`;
+}
+
+// PDF loading overlay helpers
+function showPdfLoading(totalFiles) {
+    if (!pdfLoadingOverlay) return;
+    pdfLoadingOverlay.classList.remove('hidden');
+    pdfLoadingText.textContent = `Processing ${totalFiles} PDF file(s)...`;
+    pdfLoadingSub.textContent = 'Starting...';
+    // Use indeterminate spinner: hide progress bar and percent
+    const barContainer = pdfLoadingBar ? pdfLoadingBar.parentElement : null;
+    if (barContainer) barContainer.style.display = 'none';
+    if (pdfLoadingPercent) pdfLoadingPercent.style.display = 'none';
+}
+
+function updatePdfLoadingFile(fileIndex, totalFiles, filename) {
+    if (!pdfLoadingOverlay) return;
+    pdfLoadingText.textContent = `Processing file ${fileIndex}/${totalFiles}: ${filename}`;
+    pdfLoadingSub.textContent = 'Preparing...';
+    // keep spinner; hide progress visuals
+    const barContainer = pdfLoadingBar ? pdfLoadingBar.parentElement : null;
+    if (barContainer) barContainer.style.display = 'none';
+    if (pdfLoadingPercent) pdfLoadingPercent.style.display = 'none';
+}
+
+function updatePdfLoadingProgress(percent, subtext = '') {
+    if (!pdfLoadingOverlay) return;
+    // For indeterminate loading use only subtext (spinner shown). Ignore numeric percent to avoid misleading display.
+    if (subtext) pdfLoadingSub.textContent = subtext;
+}
+
+function hidePdfLoading() {
+    if (!pdfLoadingOverlay) return;
+    pdfLoadingOverlay.classList.add('hidden');
+    // restore progress visuals state
+    const barContainer = pdfLoadingBar ? pdfLoadingBar.parentElement : null;
+    if (barContainer) barContainer.style.display = '';
+    if (pdfLoadingPercent) pdfLoadingPercent.style.display = '';
+    if (pdfLoadingBar) pdfLoadingBar.style.width = '0%';
 }
 
 function updateChunksDisplay() {
@@ -446,7 +521,7 @@ function displaySearchResults(results, query) {
                             ${(result.similarity * 100).toFixed(1)}% match
                         </span>
                     </div>
-                    <p class="text-gray-200 text-sm leading-relaxed">${result.text}</p>
+                    <p class="text-black text-sm leading-relaxed">${result.text}</p>
                     <div class="mt-2 text-xs text-gray-500">
                         Chunk #${result.index} (pos: ${result.startPos}-${result.endPos})
                     </div>
@@ -586,7 +661,7 @@ function addMessage(role, content, sources = []) {
     messageDiv.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
     
     const bubbleClass = role === 'user' 
-        ? 'bg-blue-600 text-white' 
+        ? 'bg-gray-200 text-black' 
         : role === 'system'
         ? 'bg-gray-700 text-gray-300'
         : 'bg-gray-700 text-white';
@@ -612,6 +687,34 @@ function addMessage(role, content, sources = []) {
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
+// Add a typing indicator element for assistant responses. Returns the DOM element so it can be removed later.
+function addTypingIndicator() {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'flex justify-start';
+
+    messageDiv.innerHTML = `
+        <div class="bg-gray-700 text-white rounded-lg px-4 py-3 max-w-[80%]">
+            <div class="typing-dots">
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="dot"></span>
+            </div>
+        </div>
+    `;
+
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    return messageDiv;
+}
+
+function removeTypingIndicator(el) {
+    try {
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+    } catch (e) {
+        // ignore
+    }
+}
+
 // Send message
 async function sendMessage() {
     const message = chatInput.value.trim();
@@ -635,6 +738,13 @@ async function sendMessage() {
     sendButton.disabled = true;
     chatInput.disabled = true;
     sendButton.textContent = 'Thinking...';
+    // Show typing indicator for assistant
+    let typingEl = null;
+    try {
+        typingEl = addTypingIndicator();
+    } catch (e) {
+        console.warn('Could not show typing indicator', e);
+    }
     
     try {
         let contextChunks = [];
@@ -697,10 +807,10 @@ async function sendMessage() {
         }
         
         const assistantMessage = response.choices[0].message.content;
-        
-        // Add assistant response to UI with sources
+
+        // Remove typing indicator and replace with assistant response
+        removeTypingIndicator(typingEl);
         addMessage('assistant', assistantMessage, contextChunks);
-        
         // Add to chat history
         state.chatHistory.push({ role: 'assistant', content: assistantMessage });
         
@@ -710,6 +820,8 @@ async function sendMessage() {
         console.error('Error generating response:', error);
         console.error('Error details:', error.message);
         console.error('Error stack:', error.stack);
+        // Remove typing indicator if present and show error
+        removeTypingIndicator(typingEl);
         addMessage('system', `Error: ${error.message}`);
     } finally {
         sendButton.disabled = false;
