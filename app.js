@@ -11,7 +11,9 @@ const state = {
     llmLoading: false,
     llmReady: false,
     chatHistory: [],
-    selectedModel: null
+    selectedModel: null,
+    // Temperature for LLM responses (0.0 = deterministic, 1.0 = creative)
+    temperature: 0.2
 };
 
 // DOM elements
@@ -49,6 +51,20 @@ const chatMessages = document.getElementById('chatMessages');
 const chatInput = document.getElementById('chatInput');
 const sendButton = document.getElementById('sendButton');
 const useRAG = document.getElementById('useRAG');
+// Temperature controls (slider in DOM)
+const tempSlider = document.getElementById('tempSlider');
+const tempValue = document.getElementById('tempValue');
+
+// Initialize temperature UI if present
+if (tempSlider && tempValue) {
+    tempValue.textContent = state.temperature.toFixed(2);
+    tempSlider.value = state.temperature;
+    tempSlider.addEventListener('input', (e) => {
+        const v = parseFloat(e.target.value);
+        state.temperature = v;
+        tempValue.textContent = v.toFixed(2);
+    });
+}
 
 // Initialize drag and drop
 function initDragAndDrop() {
@@ -579,11 +595,19 @@ async function loadLLMModel() {
     // Reset state if reloading
     if (state.llmEngine) {
         try {
-            // Clean up old engine
+            console.log('Cleaning up existing engine...');
+            // Properly unload the engine if method exists
+            if (typeof state.llmEngine.unload === 'function') {
+                await state.llmEngine.unload();
+            }
             state.llmEngine = null;
             state.llmReady = false;
+            // Give time for WebAssembly cleanup
+            await new Promise(resolve => setTimeout(resolve, 500));
         } catch (e) {
             console.warn('Error cleaning up old engine:', e);
+            state.llmEngine = null;
+            state.llmReady = false;
         }
     }
     
@@ -780,27 +804,26 @@ async function sendMessage() {
         ];
         
         console.log('Sending request to LLM...');
+        console.log('Using temperature:', state.temperature);
         
-        // Verify engine one more time before calling. If the engine exposes a reload method,
-        // attempt a reload to ensure the model is fully loaded in memory (prevents "Model not loaded" errors).
+        // Verify engine is ready before calling
         if (!state.llmEngine || !state.llmEngine.chat) {
             throw new Error('LLM engine is not properly initialized. Please reload the model.');
         }
-
-        if (typeof state.llmEngine.reload === 'function') {
-            try {
-                await state.llmEngine.reload(state.selectedModel);
-            } catch (reloadErr) {
-                console.warn('LLM reload attempt failed or was unnecessary:', reloadErr.message || reloadErr);
-            }
-        }
+        
+        // Do NOT call reload() here - it can corrupt the tokenizer state
+        // The engine is already loaded and ready from loadLLMModel()
 
         // Generate response
-        const response = await state.llmEngine.chat.completions.create({
+        const requestParams = {
             messages: messages,
-            temperature: 0.7,
+            temperature: state.temperature,    // Use dynamic temperature from UI
             max_tokens: 512
-        });
+        };
+        
+        console.log('LLM Request params:', { temperature: requestParams.temperature, max_tokens: requestParams.max_tokens, messageCount: messages.length });
+        
+        const response = await state.llmEngine.chat.completions.create(requestParams);
         
         if (!response || !response.choices || !response.choices[0]) {
             throw new Error('Invalid response from LLM');
@@ -811,6 +834,10 @@ async function sendMessage() {
         // Remove typing indicator and replace with assistant response
         removeTypingIndicator(typingEl);
         addMessage('assistant', assistantMessage, contextChunks);
+        
+        // Show temperature used (for debugging/transparency)
+        console.log('Response generated with temperature:', state.temperature);
+        
         // Add to chat history
         state.chatHistory.push({ role: 'assistant', content: assistantMessage });
         
