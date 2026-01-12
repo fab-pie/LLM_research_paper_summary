@@ -38,7 +38,7 @@ const pdfLoadingBar = document.getElementById('pdfLoadingBar');
 const pdfLoadingPercent = document.getElementById('pdfLoadingPercent');
 
 // LLM DOM elements
-const modelSelect = document.getElementById('modelSelect');
+// modelSelect removed - using fixed model now
 const loadModelButton = document.getElementById('loadModelButton');
 const loadingProgress = document.getElementById('loadingProgress');
 const loadingText = document.getElementById('loadingText');
@@ -272,7 +272,7 @@ function showStatus(message, type = 'info') {
     
     const colors = {
         info: 'text-blue-400',
-        success: 'text-green-400',
+        success: 'text-black font-bold',
         error: 'text-red-400'
     };
     
@@ -571,7 +571,7 @@ function updateDocumentsDisplay() {
                 </div>
                 <div class="text-right">
                     <p class="text-blue-400 font-semibold">${state.chunks.filter(c => c.source === doc.filename).length} chunks</p>
-                    <p class="text-green-400 font-semibold">${state.vectorStore.filter(v => v.source === doc.filename).length} vectors</p>
+                    <p class="text-black font-bold">${state.vectorStore.filter(v => v.source === doc.filename).length} vectors</p>
                     <p class="text-gray-500 text-xs">${new Date(doc.uploadDate).toLocaleString()}</p>
                 </div>
             </div>
@@ -585,12 +585,8 @@ function updateDocumentsDisplay() {
 
 // Load LLM model
 async function loadLLMModel() {
-    const selectedModelId = modelSelect.value;
-    
-    if (!selectedModelId) {
-        alert('Please select a model first');
-        return;
-    }
+    // Fixed model - Llama 3.2 1B
+    const selectedModelId = 'Llama-3.2-1B-Instruct-q4f16_1-MLC';
     
     // Reset state if reloading
     if (state.llmEngine) {
@@ -653,7 +649,7 @@ async function loadLLMModel() {
         // Show success message
         loadingProgress.classList.add('hidden');
         modelInfo.classList.remove('hidden');
-        modelName.textContent = modelSelect.options[modelSelect.selectedIndex].text;
+        modelName.textContent = 'Llama 3.2 1B';
         loadModelButton.textContent = 'Model Loaded';
         
         // Show chat interface
@@ -690,20 +686,9 @@ function addMessage(role, content, sources = []) {
         ? 'bg-gray-700 text-gray-300'
         : 'bg-gray-700 text-white';
     
-    let sourcesHtml = '';
-    if (sources.length > 0) {
-        sourcesHtml = `
-            <div class="mt-2 pt-2 border-t border-gray-600 text-xs">
-                <p class="font-semibold mb-1">Sources used:</p>
-                ${sources.map(s => `<p class="text-gray-400">• ${s.source} (chunk #${s.index}, ${(s.similarity * 100).toFixed(1)}% match)</p>`).join('')}
-            </div>
-        `;
-    }
-    
     messageDiv.innerHTML = `
         <div class="${bubbleClass} rounded-lg px-4 py-3 max-w-[80%]">
             <div class="text-sm whitespace-pre-wrap">${content}</div>
-            ${sourcesHtml}
         </div>
     `;
     
@@ -772,7 +757,11 @@ async function sendMessage() {
     
     try {
         let contextChunks = [];
-        let systemPrompt = `You are an expert academic researcher and literature reviewer. You help users understand and synthesize research papers.`;
+        let systemPrompt = `You are a knowledgeable research colleague helping another researcher. Be conversational and direct - skip formal structures like "Summary", "Key Points", "Conclusions". Just explain things naturally as you would to a colleague over coffee.
+
+Focus on what's actually useful: the core concepts, important findings, and how things work. Don't list source chunks or match percentages - the researcher doesn't care about retrieval mechanics, they care about the content.
+
+When explaining technical concepts, be thorough but natural. Use examples when helpful. If something is important, emphasize it naturally in your explanation rather than creating bullet points.`;
         
         // Use RAG if enabled and documents are available
         if (useRAG.checked && state.vectorStore.length > 0) {
@@ -784,10 +773,10 @@ async function sendMessage() {
                 
                 if (contextChunks.length > 0) {
                     const contextText = contextChunks
-                        .map((c, i) => `[Document ${i + 1}: ${c.source}]\n${c.text}`)
+                        .map((c, i) => `Excerpt ${i + 1} from ${c.source}:\n${c.text}`)
                         .join('\n\n---\n\n');
                     
-                    systemPrompt += `\n\nYou have access to the following relevant excerpts from uploaded research papers:\n\n${contextText}\n\nUse these excerpts to answer the user's question. Reference specific documents when relevant.`;
+                    systemPrompt += `\n\nHere are relevant excerpts from the research papers:\n\n${contextText}\n\nAnswer based on these excerpts, but don't mention chunk numbers or match percentages. Just naturally weave the information into your explanation.`;
                 }
             } catch (searchError) {
                 console.error('Error during RAG search:', searchError);
